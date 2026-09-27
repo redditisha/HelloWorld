@@ -60,6 +60,20 @@ export async function openSpreadsheet(spreadsheetId, credentialsJson) {
       return call("POST", "/values:batchUpdate", { valueInputOption: "RAW", data });
     },
 
+    /**
+     * Append rows after a tab's last row. Google applies appends atomically and
+     * INSERT_ROWS grows the grid by exactly rows.length, so two collectors
+     * running at once (GitHub + a manual run) can't overwrite each other.
+     */
+    async append(tab, lastCol, rows) {
+      if (!rows.length) return null;
+      const range = encodeURIComponent(`${q(tab)}!A1:${lastCol}`);
+      return call("POST", `/values/${range}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+        majorDimension: "ROWS",
+        values: rows,
+      });
+    },
+
     range: (tab, a1) => `${q(tab)}!${a1}`,
   };
 }

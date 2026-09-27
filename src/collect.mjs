@@ -119,29 +119,41 @@ async function main() {
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
 
-  // --- write: grow/create tabs, then fill them -----------------------------
-  const structure = [];
-  const values = [];
-  for (const [tab, rows] of [...byTab].sort(([a], [b]) => a.localeCompare(b))) {
-    const existing = tabs.get(tab);
-    if (existing) {
-      structure.push({ appendDimension: { sheetId: existing.sheetId, dimension: "ROWS", length: rows.length } });
-      values.push({ range: sheet.range(tab, `A${existing.rowCount + 1}:${LAST_ARTICLE_COL}`), values: rows });
-    } else {
-      // Grid sized exactly to the data: rowCount - 1 always equals the number
-      // of data rows, which is how the local sync knows what's new.
-      structure.push({
-        addSheet: {
-          properties: {
-            title: tab,
-            gridProperties: { rowCount: rows.length + 1, columnCount: ARTICLE_COLUMNS.length, frozenRowCount: 1 },
+  // --- write: create missing tabs, then append ------------------------------
+  // Grids hold exactly header + data rows (rowCount - 1 = data rows), which is
+  // how the local sync knows what's new. A new tab and its header row are
+  // created in one atomic request, so a concurrent run can never append data
+  // above the header; if that run created the tab first, ours is skipped.
+  const tabOrder = [...byTab.keys()].sort();
+  for (const tab of tabOrder.filter((t) => !tabs.has(t))) {
+    const sheetId = Math.floor(Math.random() * 2_000_000_000);
+    try {
+      await sheet.batchUpdate([
+        {
+          addSheet: {
+            properties: {
+              sheetId,
+              title: tab,
+              gridProperties: { rowCount: 1, columnCount: ARTICLE_COLUMNS.length, frozenRowCount: 1 },
+            },
           },
         },
-      });
-      values.push({ range: sheet.range(tab, `A1:${LAST_ARTICLE_COL}`), values: [ARTICLE_COLUMNS, ...rows] });
+        {
+          updateCells: {
+            start: { sheetId, rowIndex: 0, columnIndex: 0 },
+            rows: [{ values: ARTICLE_COLUMNS.map((c) => ({ userEnteredValue: { stringValue: c } })) }],
+            fields: "userEnteredValue",
+          },
+        },
+      ]);
+    } catch (e) {
+      if (!/already exists/i.test(e?.message || "")) throw e;
     }
   }
+  for (const tab of tabOrder) await sheet.append(tab, LAST_ARTICLE_COL, byTab.get(tab));
 
+  const structure = [];
+  const values = [];
   health.sort((a, b) => a[0].localeCompare(b[0]));
   const healthTab = tabs.get(HEALTH_TAB);
   const healthGrid = { rowCount: health.length + 1, columnCount: HEALTH_COLUMNS.length, frozenRowCount: 1 };
@@ -166,6 +178,8 @@ async function main() {
     `Done in ${((Date.now() - started) / 1000).toFixed(1)}s: ${sources.length} sources, ` +
       `${failed} failed, ${added} new articles across ${byTab.size} tab(s), ${stale} older than ${MAX_AGE_DAYS} days skipped.`
   );
+  // Machine-readable summary for the local "Sync now" runner (local/collect.py).
+  console.log(`RESULT ${JSON.stringify({ sources: sources.length, failed, new_articles: added, tabs: byTab.size })}`);
 }
 
 main().catch((e) => {
