@@ -1,0 +1,15 @@
+{
+  "name": "news-collector",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Scheduled RSS collector that appends new articles to a private Google Sheet",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "collect": "node src/collect.mjs"
+  },
+  "dependencies": {
+    "google-auth-library": "^11.1.0",
+    "rss-parser": "^3.13.0"
+  }
+}
