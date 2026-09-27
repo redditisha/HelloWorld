@@ -12,6 +12,8 @@ const BROWSER_HEADERS = {
   "Accept-Language": "en-US,en;q=0.9,kn;q=0.8,hi;q=0.7",
 };
 const FETCH_TIMEOUT_MS = 20000;
+const IST_OFFSET_MS = 5.5 * 3600_000;
+const FUTURE_TOLERANCE_MS = 10 * 60_000;
 
 const TRACKING_PARAMS = [
   "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
@@ -104,7 +106,15 @@ export function normalizeItem(item, source) {
   const dedupKey = url || guid || `t:${sha1(title)}`;
 
   const d = new Date(item.isoDate || item.pubDate || "");
-  const publishedMs = isNaN(d.getTime()) ? null : d.getTime();
+  let publishedMs = isNaN(d.getTime()) ? null : d.getTime();
+  // Some Indian feeds (e.g. Daijiworld) stamp IST clock times as GMT, which
+  // puts articles 5½ hours in the future. Shift those back; if still in the
+  // future, use the fetch time.
+  const now = Date.now();
+  if (publishedMs !== null && publishedMs > now + FUTURE_TOLERANCE_MS) {
+    const shifted = publishedMs - IST_OFFSET_MS;
+    publishedMs = shifted <= now + FUTURE_TOLERANCE_MS ? shifted : now;
+  }
   const author = item.creator || item.author || item["dc:creator"] || "";
 
   return {
