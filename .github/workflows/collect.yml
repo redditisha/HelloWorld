@@ -3,7 +3,7 @@ name: Collect news
 on:
   schedule:
     # Every 15 minutes, off the top of the hour (the busiest, most-delayed slot).
-    - cron: "7,22,37,52 * * * *"
+    - cron: "4,19,34,49 * * * *"
   workflow_dispatch:
 
 # Never run two collections at once: both would append to the same tabs.
