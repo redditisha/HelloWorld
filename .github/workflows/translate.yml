@@ -1,7 +1,8 @@
 # Cloud translator for the news sheet (redditisha/news-collector writes it).
 # Fills in English headlines (column J, title_en) for new Hindi, Kannada,
 # Tamil and Telugu articles with IndicTrans2, for up to 5 minutes per run.
-# See translator/cloud_translate.py.
+# Then groups the last 48 hours into stories (_stories tab). See
+# translator/cloud_translate.py and translator/stories_cloud.py.
 #
 # Triggered every 15 minutes from cron-job.org (workflow_dispatch through
 # the GitHub API); the hourly schedule below is only a backup, since GitHub's
@@ -53,7 +54,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: python -c "from huggingface_hub import snapshot_download; snapshot_download('ai4bharat/indictrans2-indic-en-dist-200M')"
 
-      - name: Translate (up to 5 minutes)
+      - name: Translate (up to 5 minutes), then group stories
         working-directory: translator
         env:
           SHEET_ID: ${{ secrets.SHEET_ID }}

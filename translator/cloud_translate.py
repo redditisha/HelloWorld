@@ -12,6 +12,9 @@ Rules shared with the PC and the dashboard's Translate button:
   - just before writing, the cells are read again and only empty ones are
     written: the first translation wins, nothing is overwritten.
 
+After translating, the same run groups the last 48 hours into stories
+(stories_cloud.py) and writes the _stories tab.
+
 Each run is logged as a row in the _translate_runs tab (read by the PC and
 shown on the Admin page).
 
@@ -46,7 +49,7 @@ DATE_TAB = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 RUNS_TAB = "_translate_runs"
 RUN_COLUMNS = [
     "run_id", "started_at", "finished_at", "status", "translated", "already_filled", "pending_left",
-    "seconds", "tabs", "trigger", "url", "error",
+    "seconds", "tabs", "trigger", "url", "error", "stories",
 ]
 # Day-tab columns used here (see collector/src/layout.mjs): A id, F language, G title, J title_en.
 COL_ID, COL_LANG, COL_TITLE, COL_EN = "A", "F", "G", "J"
@@ -80,9 +83,18 @@ class Sheet:
     def range(tab: str, a1: str) -> str:
         return "'" + tab.replace("'", "''") + "'!" + a1
 
-    def tabs(self) -> dict:
+    def props(self) -> dict:
+        """Tab title -> {sheetId, rowCount}."""
         d = self.call("GET", "?fields=sheets.properties(sheetId,title,gridProperties.rowCount)")
-        return {s["properties"]["title"]: s["properties"].get("gridProperties", {}).get("rowCount", 0) for s in d.get("sheets", [])}
+        return {
+            s["properties"]["title"]: {"sheetId": s["properties"]["sheetId"],
+                                       "rowCount": s["properties"].get("gridProperties", {}).get("rowCount", 0)}
+            for s in d.get("sheets", [])
+        }
+
+    def tabs(self) -> dict:
+        """Tab title -> rowCount."""
+        return {t: p["rowCount"] for t, p in self.props().items()}
 
     def read(self, ranges: list[str]) -> list[list[list[str]]]:
         if not ranges:
@@ -144,10 +156,9 @@ def flush(sheet: Sheet, done: list[dict]) -> tuple[int, int]:
 
 
 def ensure_runs_tab(sheet: Sheet, tabs: dict):
-    if RUNS_TAB in tabs:
-        return
-    sheet.call("POST", ":batchUpdate", {"requests": [{"addSheet": {"properties": {
-        "title": RUNS_TAB, "gridProperties": {"rowCount": 1, "columnCount": len(RUN_COLUMNS)}}}}]})
+    if RUNS_TAB not in tabs:
+        sheet.call("POST", ":batchUpdate", {"requests": [{"addSheet": {"properties": {
+            "title": RUNS_TAB, "gridProperties": {"rowCount": 1, "columnCount": len(RUN_COLUMNS)}}}}]})
     sheet.write([{"range": sheet.range(RUNS_TAB, "A1"), "values": [RUN_COLUMNS]}])
 
 
@@ -206,19 +217,33 @@ def main() -> int:
     except Exception as e:  # logged to the sheet, and the job fails
         status, error = "error", f"{type(e).__name__}: {e}"[:500]
         traceback.print_exc()
+    # Stories from the (now more complete) English headlines; its own step so
+    # a grouping problem never loses the translations above.
+    stories_note = ""
+    if os.environ.get("GROUP_STORIES", "1") == "1":
+        try:
+            from stories_cloud import group
+
+            g = group(sheet)
+            stories_note = f"{g['assigned']} assigned, {g['new_stories']} new, {g['stories']} kept"
+        except Exception as e:
+            status = "error"
+            error = (error + " | " if error else "") + f"stories: {type(e).__name__}: {e}"[:300]
+            stories_note = "failed"
+            traceback.print_exc()
     seconds = round(time.time() - t0)
     log.info("%s: %d translated, %d already filled, %d still waiting, %ds", status, stats["translated"], stats["skipped"], stats["pending"], seconds)
     try:
         sheet.append_row(RUNS_TAB, [run_id, started_at, now_iso(), status, stats["translated"], stats["skipped"],
-                                    stats["pending"], seconds, ",".join(sorted(stats["tabs"])), trigger, url, error])
+                                    stats["pending"], seconds, ",".join(sorted(stats["tabs"])), trigger, url, error, stories_note])
     except Exception:
         traceback.print_exc()
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf8") as f:
             f.write(f"**{status}** — {stats['translated']} translated, {stats['skipped']} already filled, "
-                    f"{stats['pending']} still waiting, {seconds}s\n")
-    print(f"::notice title=Translated::{stats['translated']} translated, {stats['pending']} still waiting, {seconds}s")
+                    f"{stats['pending']} still waiting, {seconds}s; stories: {stories_note}\n")
+    print(f"::notice title=Translated::{stats['translated']} translated, {stats['pending']} still waiting, {seconds}s; stories: {stories_note}")
     return 0 if status == "ok" else 1
 
 

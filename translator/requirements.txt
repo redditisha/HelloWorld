@@ -8,3 +8,4 @@ regex
 indic-nlp-library-itt
 google-auth
 requests
+scikit-learn
