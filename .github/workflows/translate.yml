@@ -1,0 +1,68 @@
+# Cloud translator for the news sheet (redditisha/news-collector writes it).
+# Fills in English headlines (column J, title_en) for new Hindi, Kannada,
+# Tamil and Telugu articles with IndicTrans2, for up to 5 minutes per run.
+# See translator/cloud_translate.py.
+#
+# Triggered every 15 minutes from cron-job.org (workflow_dispatch through
+# the GitHub API); the hourly schedule below is only a backup, since GitHub's
+# scheduler is unreliable on this account.
+#
+# Secrets: SHEET_ID, GOOGLE_SERVICE_ACCOUNT_JSON (same as the collector's),
+# HF_TOKEN (Hugging Face read token — only needed when the model isn't cached).
+
+name: Translate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "40 * * * *"
+
+# One run at a time; a trigger arriving mid-run waits for it.
+concurrency:
+  group: translate
+  cancel-in-progress: false
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: translator/requirements.txt
+
+      - name: Install
+        run: pip install -r translator/requirements.txt
+
+      # The model (~880 MB) stays in the Actions cache; only a cache miss
+      # (first run, or after 7 days without any run) downloads it.
+      - name: Restore the model from cache
+        id: model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub/models--ai4bharat--indictrans2-indic-en-dist-200M
+          key: indictrans2-indic-en-dist-200M-v1
+
+      - name: Download the model (cache miss only)
+        if: steps.model.outputs.cache-hit != 'true'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python -c "from huggingface_hub import snapshot_download; snapshot_download('ai4bharat/indictrans2-indic-en-dist-200M')"
+
+      - name: Translate (up to 5 minutes)
+        working-directory: translator
+        env:
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          TRANSLATE_SECONDS: "300"
+          TRANSLATE_DAYS: "3"
+        run: |
+          if [ -z "$SHEET_ID" ] || [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "::error::Add the SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON repository secrets (same values as the collector's)."
+            exit 1
+          fi
+          python cloud_translate.py

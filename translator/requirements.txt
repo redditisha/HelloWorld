@@ -6,3 +6,5 @@ sentencepiece
 sacremoses
 regex
 indic-nlp-library-itt
+google-auth
+requests
