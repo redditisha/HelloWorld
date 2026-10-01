@@ -74,6 +74,12 @@ def main():
         lines.append(f"| {cell(it['title'])} | {cell(a)} | {cell(b)} |")
     report = "\n".join(lines)
     print(report)
+    # Also as a run annotation: those show on the public run page without signing in.
+    print(
+        f"::notice title=Translation throughput::{os.cpu_count()} cores, model load {load_s:.0f}s. "
+        f"beam 5: {len(a_out)} in {a_s:.0f}s = {a_s / max(len(a_out), 1):.2f}s each, {rate_a * 300:.0f} per 5 min, {rate_a * 900:.0f} per 15 min. "
+        f"beam 2: {len(b_out)} in {b_s:.0f}s = {b_s / max(len(b_out), 1):.2f}s each, {rate_b * 300:.0f} per 5 min, {rate_b * 900:.0f} per 15 min."
+    )
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf8") as f:
             f.write(report + "\n")
