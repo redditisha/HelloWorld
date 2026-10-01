@@ -1,0 +1,70 @@
+# Translation throughput test: can a GitHub runner keep up with the news
+# collector (redditisha/news-collector, ~100-120 non-English headlines every
+# 15 minutes)? Translates real headlines with IndicTrans2 for ~5 minutes and
+# reports headlines per minute in the run summary. Manual runs only.
+#
+# Needs the HF_TOKEN repository secret: a Hugging Face read token from an
+# account that has accepted the model's terms (the model is gated).
+
+name: Translation test
+
+on:
+  workflow_dispatch:
+    inputs:
+      seconds_beam5:
+        description: "Seconds translating with beam 5 (the PC's setting)"
+        default: "180"
+      seconds_beam2:
+        description: "Seconds translating the same headlines with beam 2"
+        default: "90"
+
+concurrency: translate
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: translator/requirements.txt
+
+      - name: Install
+        run: pip install -r translator/requirements.txt
+
+      # The model (~880 MB) is kept in GitHub's Actions cache, so only the
+      # first run (or one after 7 days without any run) downloads it.
+      - name: Restore the model from cache
+        id: model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub/models--ai4bharat--indictrans2-indic-en-dist-200M
+          key: indictrans2-indic-en-dist-200M-v1
+
+      - name: Download the model (cache miss only)
+        if: steps.model.outputs.cache-hit != 'true'
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::Add a Hugging Face read token as the HF_TOKEN repository secret (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          python -c "from huggingface_hub import snapshot_download; snapshot_download('ai4bharat/indictrans2-indic-en-dist-200M')"
+
+      - name: Translate for ~5 minutes
+        working-directory: translator
+        env:
+          BENCH_SECONDS_A: ${{ inputs.seconds_beam5 }}
+          BENCH_SECONDS_B: ${{ inputs.seconds_beam2 }}
+        run: python bench.py
+
+      - name: Keep the translations (for a quality check)
+        uses: actions/upload-artifact@v4
+        with:
+          name: translations
+          path: translator/results.jsonl

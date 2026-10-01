@@ -1,0 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.6
+# IndicTrans2's model code (loaded from the Hub) needs this exact version.
+transformers==4.45.2
+sentencepiece
+sacremoses
+regex
+indic-nlp-library-itt
